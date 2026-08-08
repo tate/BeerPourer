@@ -600,7 +600,7 @@ const TITLES = [
   note: '店長がカウンターの奥から出てきました。' }
 ];
 
-const HINT_DEFAULT = '押している間だけ注げます。マウス（指）の上下でボトルの傾きを調整<br>'
+const HINT_DEFAULT = '押している間だけ注げます。カーソルを上げるほど勢いよく注げます<br>'
     + '<span class="muted">注げるのは一度きり。手を離した時点で判定です</span>';
 
 const el = id => document.getElementById(id);
@@ -657,7 +657,8 @@ layout();
 /* ---------- 入力 ---------- */
 function setPower(clientY) {
     const y = clientY - geom.areaTop;
-    const p = Math.max(0, Math.min(1, (y - geom.areaH * 0.10) / (geom.areaH * 0.80)));
+    // 上に行くほど1に近づく（＝ボトルが立って勢いが増す）
+    const p = 1 - Math.max(0, Math.min(1, (y - geom.areaH * 0.10) / (geom.areaH * 0.80)));
     // 直線的に対応させると微妙な傾きの範囲が狭くなるので、緩やかな曲線にする
     state.targetAngle = CFG.restAngle * Math.pow(1 - p, 0.45);
 }
