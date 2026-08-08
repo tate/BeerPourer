@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ビール注ぎ職人</title>
+<style>
+    :root {
+        --glass-w: 140px;
+        --glass-h: 300px;
+        --bottle-h: 180px;
+        --neck-len: 40px;   /* ボトル本体の下端から口先までの長さ */
+        --mouth-gap: 70px;  /* 口先からグラスの縁までの距離 */
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        background-color: #1a202c;
+        color: #fff;
+        font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif;
+        overflow: hidden;
+        overscroll-behavior: none;          /* 引っ張って更新を防ぐ */
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .hidden { display: none !important; }
+    .muted { color: #a0aec0; }
+
+    #game-area {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        height: 100svh;   /* スマホのアドレスバー分を除いた高さ */
+        display: flex;
+        justify-content: center;
+        align-items: flex-end;
+        padding-bottom: 9vh;
+        overflow: hidden;
+    }
+
+    /* ボトルとグラスを縦に積み、位置関係を画面サイズに依存させない */
+    #station {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    /* 高さ0の基準点。ここを起点にボトルと流れを配置する */
+    #bottle-mount {
+        position: relative;
+        width: 0;
+        height: 0;
+        margin-bottom: calc(var(--neck-len) + var(--mouth-gap));
+        z-index: 5;
+    }
+
+    #bottle {
+        position: absolute;
+        left: -30px;
+        bottom: 0;
+        width: 60px;
+        height: var(--bottle-h);
+        background: linear-gradient(to right, #3d1f08, #8b4a17 42%, #a35c22 55%, #6b3410 72%, #2e1706);
+        border-radius: 8px 8px 4px 4px;
+        /* 回転軸を口先に置く。傾けても注ぎ口が動かない */
+        transform-origin: center calc(100% + var(--neck-len));
+        box-shadow: inset -8px 0 18px rgba(0,0,0,.4);
+    }
+
+    /* ラベルは置かず、瓶に直接白文字で入れる */
+    #bottle-label {
+        position: absolute;
+        top: 26%; left: 0; right: 0;
+        height: 48%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255,255,255,.92);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: .12em;
+        writing-mode: vertical-rl;
+        text-shadow: 0 1px 3px rgba(0,0,0,.55);
+    }
+
+    #neck {
+        position: absolute;
+        left: 15px;
+        bottom: calc(-1 * var(--neck-len));
+        width: 30px;
+        height: var(--neck-len);
+        background: linear-gradient(to right, #3d1f08, #8b4a17 42%, #a35c22 55%, #6b3410 72%, #2e1706);
+        border-radius: 0 0 4px 4px;
+    }
+
+    /* 流れはボトルの子にしない（回転の影響を受けない） */
+    #stream {
+        position: absolute;
+        top: var(--neck-len);
+        left: 0;
+        width: 10px;
+        margin-left: -5px;
+        height: 0;
+        background: linear-gradient(to bottom, rgba(243,229,171,.95), rgba(243,229,171,.75));
+        border-radius: 0 0 6px 6px;
+        box-shadow: 0 0 12px rgba(243, 229, 171, .45);
+    }
+
+    #glass {
+        position: relative;
+        width: var(--glass-w);
+        height: var(--glass-h);
+        background: rgba(255, 255, 255, 0.08);
+        border: 4px solid rgba(255, 255, 255, 0.5);
+        border-top: none;
+        border-radius: 0 0 20px 20px;
+        overflow: hidden;
+        z-index: 10;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5) inset;
+    }
+
+    .liquid-container {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+    }
+
+    #beer {
+        width: 100%;
+        height: 0%;
+        background: linear-gradient(to right, #c99a2e, #f3e5ab 45%, #d4af37);
+    }
+
+    #foam {
+        width: 100%;
+        height: 0%;
+        background:
+            radial-gradient(circle at 20% 30%, rgba(0,0,0,.06) 0 4px, transparent 5px),
+            radial-gradient(circle at 65% 60%, rgba(0,0,0,.05) 0 5px, transparent 6px),
+            #fdfdfb;
+        box-shadow: inset 0 4px 8px rgba(0,0,0,0.08);
+    }
+
+    /* ---- カウンターとこぼれた分の受け ---- */
+    #counter {
+        position: absolute;
+        bottom: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(86vw, 560px);
+        height: 14px;
+        background: linear-gradient(#6b4423, #40260f);
+        border-radius: 4px;
+        box-shadow: 0 6px 14px rgba(0,0,0,.45);
+        z-index: 1;
+    }
+
+    /* グラスの外側を伝う雫 */
+    .drip {
+        position: absolute;
+        top: calc(var(--neck-len) + var(--mouth-gap));
+        width: 7px;
+        height: 0;
+        background: linear-gradient(to bottom, rgba(243,229,171,.5), rgba(212,175,55,.9));
+        border-radius: 0 0 4px 4px;
+        z-index: 12;
+        pointer-events: none;
+    }
+    #drip-l { left: calc(50% - var(--glass-w) / 2 + 1px); }
+    #drip-r { left: calc(50% + var(--glass-w) / 2 - 8px); }
+
+    #puddle {
+        position: absolute;
+        bottom: -12px;
+        left: 50%;
+        width: 0;
+        height: 0;
+        transform: translateX(-50%);
+        background:
+            radial-gradient(circle at 30% 40%, rgba(255,255,255,.55) 0 3px, transparent 4px),
+            radial-gradient(circle at 62% 55%, rgba(255,255,255,.45) 0 4px, transparent 5px),
+            radial-gradient(ellipse at center, rgba(243,229,171,.95), rgba(198,158,45,.85));
+        border-radius: 50%;
+        opacity: 0;
+        z-index: 2;
+        box-shadow: 0 2px 10px rgba(0,0,0,.4);
+        transition: width .25s linear, height .25s linear, opacity .4s linear;
+    }
+
+    #spill-canvas {
+        position: absolute;
+        top: 0; left: 0;
+        pointer-events: none;
+        z-index: 30;
+    }
+
+    /* ---- HUD ---- */
+    .hud {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%;
+        padding: 16px;
+        display: flex;
+        justify-content: center;
+        z-index: 40;
+        pointer-events: none;
+    }
+
+    .hud-panel {
+        background: rgba(26, 32, 44, .75);
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 10px;
+        padding: 8px 18px;
+        font-size: 14px;
+        display: flex;
+        gap: 20px;
+    }
+    .hud-panel .val { font-family: ui-monospace, monospace; color: #fff; }
+
+    .btn {
+        background: linear-gradient(to bottom, #f6e05e, #d69e2e);
+        color: #1a202c;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: bold;
+        padding: 10px 28px;
+        border-radius: 8px;
+        border: 2px solid #b7791f;
+        cursor: pointer;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        transition: transform .1s, box-shadow .1s;
+        pointer-events: auto;
+    }
+    .btn:active { transform: translateY(2px); box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+    .btn:focus-visible { outline: 3px solid #90cdf4; outline-offset: 2px; }
+
+    #hint-bar {
+        position: absolute;
+        bottom: 12px;
+        width: 100%;
+        text-align: center;
+        z-index: 40;
+        pointer-events: none;
+        padding: 0 16px;
+    }
+    #hint {
+        display: inline-block;
+        font-size: 13px;
+        line-height: 1.7;
+        color: #e2e8f0;
+        background: rgba(0,0,0,.5);
+        padding: 8px 18px;
+        border-radius: 999px;
+    }
+
+    /* ---- 判定パネル（グラスを隠さないよう画面上部に出す） ---- */
+    #result-panel {
+        position: absolute;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(540px, 94vw);
+        max-height: calc(100vh - var(--glass-h) - 13vh);
+        max-height: calc(100svh - var(--glass-h) - 13svh);
+        overflow-y: auto;
+        background: rgba(45, 55, 72, .96);
+        border: 1px solid #4a5568;
+        border-radius: 14px;
+        padding: 18px 22px;
+        box-shadow: 0 20px 45px rgba(0,0,0,.55);
+        z-index: 45;
+        display: none;
+        text-align: left;
+    }
+    #result-panel.is-open {
+        display: block;
+        animation: drop-in .32s cubic-bezier(.2,.9,.3,1.2);
+    }
+    @keyframes drop-in {
+        from { opacity: 0; transform: translate(-50%, -18px); }
+        to   { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    .rank-label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 10px;
+        letter-spacing: .3em;
+        color: #a0aec0;
+        margin-bottom: 8px;
+    }
+    .rank-label::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: #4a5568;
+    }
+    .stars {
+        color: #f6e05e;
+        letter-spacing: .15em;
+        margin-left: 8px;
+        font-size: 12px;
+        text-shadow: 0 0 8px rgba(246,224,94,.6);
+    }
+    .rank-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .rank-name {
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: .06em;
+        line-height: 1.2;
+    }
+    .score { font-size: 34px; font-weight: 900; line-height: 1; white-space: nowrap; }
+    .score small { font-size: 15px; margin-left: 2px; }
+    .rank-note { font-size: 13px; color: #a0aec0; margin-top: 6px; }
+
+    .s-perfect { color: #faf089; }
+    .s-good    { color: #68d391; }
+    .s-ok      { color: #fff; }
+    .s-bad     { color: #fc8181; }
+
+    /* 特別称号のみ金色に輝かせる */
+    .rank-name.s-legend {
+        font-size: 30px;
+        background: linear-gradient(100deg, #d69e2e, #fffbe6 45%, #f6e05e 55%, #b7791f);
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 0 12px rgba(246, 224, 94, .55));
+        animation: legend-shine 2.6s ease-in-out infinite;
+    }
+    @keyframes legend-shine {
+        0%, 100% { background-position: 0% 50%; }
+        50%      { background-position: 100% 50%; }
+    }
+
+    .stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 18px;
+        margin: 14px 0 10px;
+        padding: 10px 14px;
+        background: rgba(0,0,0,.25);
+        border-radius: 8px;
+        font-size: 14px;
+        color: #cbd5e0;
+    }
+    .stats b { font-family: ui-monospace, monospace; color: #fff; }
+    .stats b.beer { color: #faf089; }
+    .stats .spill b { color: #fc8181; }
+
+    .comments { font-size: 13px; line-height: 1.7; color: #e2e8f0; }
+    .comments p { margin: 0 0 3px; }
+
+    .panel-foot { text-align: center; margin-top: 14px; }
+
+    /* 判定中はHUDとヒントを引っ込めて、パネルとグラスに集中させる */
+    #game-area.judged .hud,
+    #game-area.judged #hint-bar { display: none; }
+
+    /* ボトルが水平近くまで寝ると横に張り出すため、狭い画面では細くする */
+    @media (max-width: 520px) {
+        #bottle { left: -24px; width: 48px; }
+        #bottle-label { font-size: 11px; letter-spacing: .08em; }
+        #neck { left: 12px; width: 24px; }
+        .rank-name { font-size: 22px; }
+        .score { font-size: 28px; }
+        #hint { font-size: 12px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .btn { transition: none; }
+        .rank-name.s-legend { animation: none; }
+        #result-panel.is-open { animation: none; }
+    }
+</style>
+</head>
+<body>
+
+<div id="game-area">
+
+    <div id="station">
+        <div id="bottle-mount">
+            <div id="bottle">
+                <div id="bottle-label">Craft Beer</div>
+                <div id="neck"></div>
+            </div>
+            <div id="stream"></div>
+        </div>
+
+        <div id="glass">
+            <div class="liquid-container">
+                <div id="foam"></div>
+                <div id="beer"></div>
+            </div>
+        </div>
+
+        <div id="drip-l" class="drip"></div>
+        <div id="drip-r" class="drip"></div>
+        <div id="counter"></div>
+        <div id="puddle"></div>
+    </div>
+
+    <canvas id="spill-canvas"></canvas>
+
+    <div class="hud">
+        <div class="hud-panel">
+            <span class="muted">総量 <span id="hud-total" class="val">0</span>%</span>
+            <span class="muted">ビール : 泡 <span id="hud-ratio" class="val">--</span></span>
+        </div>
+    </div>
+
+    <div id="result-panel" role="status" aria-live="polite">
+        <div class="rank-label">称号<span id="rank-stars" class="stars"></span></div>
+        <div class="rank-row">
+            <div class="rank-name" id="rank-name">-</div>
+            <div class="score"><span id="score-display">0</span><small>点</small></div>
+        </div>
+        <div class="rank-note" id="rank-note"></div>
+
+        <div class="stats">
+            <span>総量 <b id="res-total">0</b>%</span>
+            <span>ビール <b id="res-beer" class="beer">0</b>%</span>
+            <span>泡 <b id="res-foam">0</b>%</span>
+            <span class="spill hidden" id="detail-spill-row">あふれ <b id="res-spill"></b></span>
+        </div>
+
+        <div id="comment-display" class="comments"></div>
+
+        <div class="panel-foot">
+            <button id="retry-btn" class="btn">もう一杯注ぐ</button>
+        </div>
+    </div>
+
+    <div id="hint-bar">
+        <p id="hint"></p>
+    </div>
+</div>
+
+<script>
+const CFG = {
+    idealBeer: 70,      // ビールの理想比率(%)
+    restAngle: 100,     // 待機角度(度)。90度=水平、それ以上は口が上を向く
+    flowStart: 95,      // これより起こすと流れ始める（水平の少し手前）
+    fillRate: 48,       // 真下向き時の増加量(%/秒)
+    foamDecay: 2.4,     // 泡が消える速さ(%/秒)
+    foamToBeer: 0.22,   // 消えた泡のうち液体に戻る割合
+    glassH: 300,
+    neck: 40,
+    gap: 70
+};
+
+/* ---------- 称号テーブル ----------
+   上から順に判定し、最初に条件を満たしたものを採用する。
+   m = { T:総量, B:ビール比率, F:泡比率, S:こぼした量, dB:70との差, score:点数 }
+   rare は称号横に出る★の数（3が最難関）                                   */
+const TITLES = [
+// ---- 極致・奇跡 ----
+{ c: m => m.T >= 99.5 && m.dB <= 0.5 && m.S < 0.2, cls: 's-legend', rare: 3, name: '神の一杯',
+  note: '語り継がれる一杯。もう二度と出せないかもしれません。' },
+{ c: m => m.T >= 98.5 && m.dB <= 1 && m.S < 0.5, cls: 's-legend', rare: 3, name: 'ビールの神',
+  note: '縁まで満たして寸分の狂いなし。' },
+{ c: m => m.T >= 97 && m.dB <= 2 && m.S < 1, cls: 's-legend', rare: 2, name: '黄金比の伝道師',
+  note: '7:3を体が覚えています。' },
+{ c: m => m.T >= 99 && m.dB <= 5 && m.S < 1, cls: 's-legend', rare: 2, name: '縁ぎりぎりの魔術師',
+  note: 'よくこぼさずに止められました。' },
+{ c: m => m.T >= 69 && m.T <= 71 && m.B >= 69 && m.B <= 71, cls: 's-legend', rare: 2, name: '70:70の奇跡',
+  note: '総量も比率も70。狙って出せるものではありません。' },
+{ c: m => m.T >= 95 && m.dB <= 3 && m.S < 1, cls: 's-perfect', rare: 1, name: '伝説のビールマイスター',
+  note: '今日から店の看板です。' },
+{ c: m => m.T >= 95 && m.dB <= 1.5 && m.S >= 3, cls: 's-perfect', rare: 2, name: '代償の黄金比',
+  note: '完璧な比率。ただし足元はビールまみれ。' },
+{ c: m => m.T >= 95 && m.dB <= 3 && m.S < 8, cls: 's-perfect', name: '詰めの甘い天才',
+  note: '腕は本物。惜しむらくは手元です。' },
+{ c: m => m.T >= 20 && m.dB <= 5 && m.S >= 20, cls: 's-bad', name: '代償の大きい完璧主義者',
+  note: '一杯のために床を犠牲にしました。' },
+
+// ---- 大惨事 ----
+{ c: m => m.S >= 100, cls: 's-bad', rare: 1, name: '災害認定',
+  note: '保健所に連絡が必要な量です。' },
+{ c: m => m.T < 20 && m.S >= 30, cls: 's-bad', rare: 1, name: '全部床に注いだ男',
+  note: 'グラスはどこへ行ったのでしょう。' },
+{ c: m => m.S >= 60, cls: 's-bad', name: 'ビールを憎む者',
+  note: '何か恨みでもあるのですか。' },
+{ c: m => m.S >= 40, cls: 's-bad', name: '床がビールの海',
+  note: '歩くたびに足がべたつきます。' },
+{ c: m => m.F >= 80 && m.S >= 10 && m.T >= 30, cls: 's-bad', name: '泡まみれの惨劇',
+  note: 'もう手のつけようがありません。' },
+{ c: m => m.T < 40 && m.S >= 10, cls: 's-bad', name: '二度と来ない客',
+  note: '量も足りず、こぼしてもいます。' },
+{ c: m => m.S >= 25, cls: 's-bad', name: '床掃除係',
+  note: 'こぼした分は給料から引かれます。' },
+{ c: m => m.S >= 15, cls: 's-bad', name: 'モップ常備',
+  note: 'もう手放せなくなってきました。' },
+{ c: m => m.S >= 8, cls: 's-ok', name: 'そそっかしい店員',
+  note: '落ち着いていきましょう。' },
+
+// ---- 堅実な腕前 ----
+{ c: m => m.T >= 93 && m.dB <= 5 && m.S < 0.5, cls: 's-perfect', name: '無傷の実力者',
+  note: '拭くものが何もありません。' },
+{ c: m => m.T >= 93 && m.dB <= 5 && m.S < 2, cls: 's-perfect', name: 'ビールマイスター',
+  note: '常連が名指しで注文してきます。' },
+{ c: m => m.T >= 85 && m.T < 95 && m.dB <= 2, cls: 's-good', name: '精密機械',
+  note: '比率は完璧。量だけが惜しい。' },
+{ c: m => m.T >= 85 && m.T < 93 && m.dB <= 5, cls: 's-good', name: 'あと一歩',
+  note: '惜しいところまで来ています。' },
+{ c: m => m.T >= 90 && m.dB <= 8, cls: 's-good', name: '一人前の注ぎ手',
+  note: 'カウンターを任せられます。' },
+{ c: m => m.T >= 95 && m.dB > 8 && m.dB <= 15, cls: 's-good', name: 'なみなみ派',
+  note: '量で押し切りました。' },
+{ c: m => m.T >= 80 && m.dB <= 8, cls: 's-good', name: '見習い職人',
+  note: '形にはなっています。数をこなせば化けます。' },
+{ c: m => m.T >= 70 && m.T < 85 && m.dB <= 5, cls: 's-ok', name: '腹八分目の美学',
+  note: '上品ですが、少し物足りない。' },
+{ c: m => m.T >= 60 && m.T < 75 && m.dB <= 8, cls: 's-ok', name: '物足りない一杯',
+  note: 'もう一口欲しくなります。' },
+{ c: m => m.T >= 60 && m.T < 80 && m.dB <= 8, cls: 's-ok', name: '慎重すぎる新人',
+  note: '怖がらずにもう少し。' },
+
+// ---- わずかなこぼし（そこそこ注げている場合のみ） ----
+{ c: m => m.T >= 80 && m.dB <= 12 && m.S >= 3, cls: 's-ok', name: '拭けば済む',
+  note: '誤差の範囲です。' },
+{ c: m => m.T >= 80 && m.dB <= 12 && m.S >= 1, cls: 's-good', name: '一滴の悔い',
+  note: '惜しかった。あと少しでした。' },
+
+// ---- 泡が多い ----
+{ c: m => m.T >= 10 && m.T < 50 && m.F >= 60, cls: 's-bad', name: '泡の墓場',
+  note: '少ない上に、ほとんど泡です。' },
+{ c: m => m.T >= 5 && m.T < 25 && m.F >= 90, cls: 's-bad', name: '泡だけ提供',
+  note: '中身が見当たりません。' },
+{ c: m => m.T >= 25 && m.F >= 95, cls: 's-bad', rare: 1, name: 'カプチーノ職人',
+  note: '店を間違えていませんか。' },
+{ c: m => m.T >= 25 && m.F >= 85, cls: 's-bad', name: 'ホイップクリーム係',
+  note: 'ケーキ屋でなら優秀です。' },
+{ c: m => m.T >= 25 && m.F >= 70, cls: 's-bad', name: '泡だらけの見習い',
+  note: '落ち着くまで待ちましょう。' },
+{ c: m => m.T >= 98 && m.F >= 60, cls: 's-bad', name: '見た目だけは満杯',
+  note: '泡が沈めば半分になります。' },
+{ c: m => m.T >= 25 && m.F >= 55, cls: 's-ok', name: '泡ファースト',
+  note: '主役を間違えています。' },
+{ c: m => m.T >= 25 && m.F >= 45, cls: 's-ok', name: '五分五分',
+  note: '潔い割り切りです。' },
+{ c: m => m.T >= 25 && m.F >= 38, cls: 's-ok', name: '泡多め注意報',
+  note: 'あと一歩。ボトルを少し寝かせて。' },
+
+// ---- 泡が少ない ----
+{ c: m => m.T >= 99 && m.F < 3, cls: 's-bad', rare: 1, name: 'サイダー職人',
+  note: '炭酸が抜けているのでは。' },
+{ c: m => m.T >= 95 && m.B >= 98, cls: 's-ok', name: 'ビール原理主義者',
+  note: '泡を全否定しています。' },
+{ c: m => m.T >= 90 && m.F < 2, cls: 's-ok', name: '泡を知らない男',
+  note: '泡は敵ではありません。' },
+{ c: m => m.T >= 85 && m.F < 6, cls: 's-ok', name: '無音の一杯',
+  note: '静かすぎます。' },
+{ c: m => m.T >= 20 && m.T < 60 && m.F < 10, cls: 's-bad', name: 'ただの液体',
+  note: 'これをビールと呼べるでしょうか。' },
+{ c: m => m.T >= 40 && m.F < 15, cls: 's-ok', name: '泡はいらない派',
+  note: '好みは分かれるところです。' },
+{ c: m => m.T >= 40 && m.F < 22, cls: 's-good', name: 'あと一押し',
+  note: 'もう少し勢いをつけて。' },
+
+// ---- 量の問題 ----
+{ c: m => m.T < 3, cls: 's-bad', name: '空きグラス提供係',
+  note: '注ぐ気はあるのでしょうか。' },
+{ c: m => m.T < 10 && m.S < 0.5, cls: 's-bad', name: '潔癖な傍観者',
+  note: 'こぼしませんが、注いでもいません。' },
+{ c: m => m.T < 10, cls: 's-bad', name: '試飲係',
+  note: '一口で終わってしまいます。' },
+{ c: m => m.T < 25, cls: 's-bad', name: 'ちびちび派',
+  note: '遠慮しすぎです。' },
+{ c: m => m.T < 45, cls: 's-bad', name: 'グラス選びの失敗',
+  note: '器が大きすぎたのでしょう。' },
+{ c: m => m.T < 60, cls: 's-ok', name: '半人前',
+  note: '文字どおり半分です。' },
+
+// ---- ここから下は保険。上のいずれにも当てはまらない場合のみ ----
+{ c: m => m.score >= 58, cls: 's-ok', name: 'バイト三日目',
+  note: '飲めますが、隣の客がちらっと見ています。' },
+{ c: m => m.score >= 40, cls: 's-ok', name: '素人',
+  note: 'まずは泡と液体の境目を意識するところから。' },
+{ c: m => m.score >= 20, cls: 's-bad', name: '洗い場担当',
+  note: 'しばらくグラスを磨いて出直しましょう。' },
+{ c: m => m.score >= 1, cls: 's-bad', name: '要再教育',
+  note: 'ビールが泣いています。' },
+{ c: () => true, cls: 's-bad', name: '出入り禁止',
+  note: '店長がカウンターの奥から出てきました。' }
+];
+
+const HINT_DEFAULT = '押している間だけ注げます。マウス（指）の上下でボトルの傾きを調整<br>'
+    + '<span class="muted">注げるのは一度きり。手を離した時点で判定です</span>';
+
+const el = id => document.getElementById(id);
+const ui = {
+    area: el('game-area'), bottle: el('bottle'), stream: el('stream'),
+    beer: el('beer'), foam: el('foam'), glass: el('glass'),
+    hudTotal: el('hud-total'), hudRatio: el('hud-ratio'),
+    puddle: el('puddle'), dripL: el('drip-l'), dripR: el('drip-r'),
+    panel: el('result-panel'), retryBtn: el('retry-btn'),
+    canvas: el('spill-canvas'), hint: el('hint')
+};
+const ctx = ui.canvas.getContext('2d');
+
+const state = {
+    pouring: false, poured: false, beer: 0, foam: 0, spilled: 0,
+    angle: CFG.restAngle, targetAngle: CFG.restAngle,
+    finished: false, spillTimer: 0
+};
+const geom = { cx: 0, rimY: 0, glassW: 140, floorY: 0 };
+let particles = [];
+
+/* ---------- レイアウト（実際の描画領域に合わせて各部を縮める） ---------- */
+function layout() {
+    const area = ui.area.getBoundingClientRect();
+    geom.areaTop = area.top;
+    geom.areaH = area.height;
+
+    const narrow = window.innerWidth <= 520;
+    const short = area.height <= 560;          // 横向きスマホなど
+
+    CFG.glassH = Math.round(Math.max(150, Math.min(300, area.height * 0.60 - 170)));
+    CFG.gap = short ? 44 : 70;
+    const bottleH = short ? 100 : (narrow ? 130 : 180);
+
+    const root = document.documentElement.style;
+    root.setProperty('--glass-h', CFG.glassH + 'px');
+    root.setProperty('--neck-len', CFG.neck + 'px');
+    root.setProperty('--mouth-gap', CFG.gap + 'px');
+    root.setProperty('--bottle-h', bottleH + 'px');
+
+    ui.canvas.width = window.innerWidth;
+    ui.canvas.height = window.innerHeight;
+
+    const r = ui.glass.getBoundingClientRect();
+    geom.cx = r.left + r.width / 2;
+    geom.rimY = r.top;
+    geom.glassW = r.width;
+    geom.floorY = r.bottom + 6;   // ここに落ちた飛沫は水たまりになる
+}
+window.addEventListener('resize', layout);
+window.addEventListener('orientationchange', layout);
+layout();
+
+/* ---------- 入力 ---------- */
+function setPower(clientY) {
+    const y = clientY - geom.areaTop;
+    const p = Math.max(0, Math.min(1, (y - geom.areaH * 0.10) / (geom.areaH * 0.80)));
+    // 直線的に対応させると微妙な傾きの範囲が狭くなるので、緩やかな曲線にする
+    state.targetAngle = CFG.restAngle * Math.pow(1 - p, 0.45);
+}
+
+function onMove(clientY) {
+    if (!state.finished) setPower(clientY);
+}
+
+function onDown(target, clientY) {
+    if (target && target.closest && target.closest('button')) return;
+    if (state.finished || state.poured) return;
+    setPower(clientY);
+    state.pouring = true;
+}
+
+// 手を離した時点で1回の注ぎが終了し、そのまま判定に入る
+function onUp() {
+    if (!state.pouring) return;
+    state.pouring = false;
+    // 一滴も出ていない誤タップは注いだ扱いにしない
+    if (state.beer + state.foam < 1) return;
+    state.poured = true;
+    finishGame();
+}
+
+const onButton = t => !!(t && t.closest && t.closest('button'));
+
+if (window.PointerEvent) {
+    ui.area.addEventListener('pointermove', e => onMove(e.clientY));
+    ui.area.addEventListener('pointerdown', e => {
+        // ボタン上でpreventDefaultするとタップが効かなくなるので触らない
+        if (onButton(e.target)) return;
+        e.preventDefault();
+        onDown(e.target, e.clientY);
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => ui.area.addEventListener(ev, onUp));
+} else {
+    ui.area.addEventListener('mousemove', e => onMove(e.clientY));
+    ui.area.addEventListener('mousedown', e => onDown(e.target, e.clientY));
+    ['mouseup', 'mouseleave'].forEach(ev => ui.area.addEventListener(ev, onUp));
+    ui.area.addEventListener('touchmove', e => { e.preventDefault(); onMove(e.touches[0].clientY); }, { passive: false });
+    ui.area.addEventListener('touchstart', e => {
+        if (onButton(e.target)) return;
+        e.preventDefault();
+        onDown(e.target, e.touches[0].clientY);
+    }, { passive: false });
+    ['touchend', 'touchcancel'].forEach(ev => ui.area.addEventListener(ev, onUp));
+}
+
+ui.retryBtn.addEventListener('click', resetGame);
+
+/* ---------- あふれた飛沫 ---------- */
+class Particle {
+    constructor(x, y, isFoam) {
+        this.x = x; this.y = y;
+        this.vx = (Math.random() - 0.5) * 110;
+        this.vy = (Math.random() * -50) - 30;
+        this.r = Math.random() * 3 + 2;
+        this.isFoam = isFoam;
+        this.life = 1;
+        this.decay = Math.random() * 0.5 + 0.35;
+    }
+    update(dt) {
+        this.vy += 900 * dt;
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= this.decay * dt;
+        // カウンターに達したら消える（見た目は水たまりが受け止める）
+        if (this.y >= geom.floorY && this.vy > 0) this.life = 0;
+    }
+    draw() {
+        const a = Math.max(0, this.life);
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fillStyle = this.isFoam ? 'rgba(255,255,255,' + a + ')' : 'rgba(243,229,171,' + a + ')';
+        ctx.fill();
+    }
+}
+
+function spawnSpill(foamRatio) {
+    for (let i = 0; i < 3; i++) {
+        const side = Math.random() > 0.5 ? 1 : -1;
+        particles.push(new Particle(
+            geom.cx + (geom.glassW / 2 - 8) * side, geom.rimY, Math.random() < foamRatio));
+    }
+}
+
+/* ---------- 注ぎの計算 ---------- */
+function flowFactor(angle) {
+    const c = Math.cos(angle * Math.PI / 180);
+    const c0 = Math.cos(CFG.flowStart * Math.PI / 180);
+    return Math.max(0, (c - c0) / (1 - c0));   // 0=出ない, 1=真下向き
+}
+
+function pour(dt) {
+    const f = flowFactor(state.angle);
+    if (f <= 0) return;
+
+    const rate = CFG.fillRate * Math.pow(f, 0.8) * dt;
+    const foamRatio = 0.10 + 0.85 * Math.pow(f, 1.3);
+    let addFoam = rate * foamRatio;
+    let addBeer = rate * (1 - foamRatio);
+
+    const space = 100 - (state.beer + state.foam);
+
+    if (addBeer + addFoam > space) {
+        state.spilled += addBeer + addFoam - space;
+        const ratio = space > 0 ? space / (addBeer + addFoam) : 0;
+        addBeer *= ratio;
+        addFoam *= ratio;
+
+        state.spillTimer -= dt;
+        if (state.spillTimer <= 0) { spawnSpill(foamRatio); state.spillTimer = 0.05; }
+    }
+    state.beer += addBeer;
+    state.foam += addFoam;
+}
+
+function settleFoam(dt) {
+    if (state.foam <= 0) { state.foam = 0; return; }
+    const d = Math.min(state.foam, CFG.foamDecay * dt);
+    state.foam -= d;
+    state.beer += d * CFG.foamToBeer;   // 泡は一部が液体に戻る
+}
+
+/* ---------- 描画 ---------- */
+function renderSpill() {
+    if (state.spilled <= 0.3) {
+        ui.puddle.style.width = '0px';
+        ui.puddle.style.height = '0px';
+        ui.puddle.style.opacity = '0';
+        ui.dripL.style.height = ui.dripR.style.height = '0px';
+        return;
+    }
+    const w = Math.min(340, 46 + state.spilled * 5);
+    ui.puddle.style.width = w + 'px';
+    ui.puddle.style.height = (w * 0.2) + 'px';
+    ui.puddle.style.opacity = Math.min(1, 0.45 + state.spilled / 25);
+
+    const dh = Math.min(CFG.glassH + 14, state.spilled * 16);
+    ui.dripL.style.height = dh + 'px';
+    ui.dripR.style.height = Math.max(0, dh - 18) + 'px';
+}
+
+function render() {
+    const total = state.beer + state.foam;
+    ui.beer.style.height = state.beer + '%';
+    ui.foam.style.height = state.foam + '%';
+    ui.bottle.style.transform = 'rotate(' + (-state.angle) + 'deg)';
+
+    const f = flowFactor(state.angle);
+    if (state.pouring && f > 0) {
+        const w = 5 + f * 9;
+        ui.stream.style.width = w + 'px';
+        ui.stream.style.marginLeft = (-w / 2) + 'px';
+        ui.stream.style.height = (CFG.gap + CFG.glassH * (1 - total / 100)) + 'px';
+    } else {
+        ui.stream.style.height = '0px';
+    }
+
+    renderSpill();
+
+    ui.hudTotal.textContent = Math.round(total);
+    ui.hudRatio.textContent = total > 5
+        ? Math.round(state.beer / total * 100) + ' : ' + Math.round(state.foam / total * 100)
+        : '--';
+}
+
+/* ---------- メインループ（フレームレート非依存） ---------- */
+let last = performance.now();
+function loop(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);  // タブ復帰時の飛びを抑える
+    last = now;
+
+    ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].update(dt);
+        particles[i].draw();
+        if (particles[i].life <= 0) particles.splice(i, 1);
+    }
+
+    // 判定後もボトルは待機位置へ戻す（中身の量と泡は固定したまま）
+    state.angle += (state.targetAngle - state.angle) * (1 - Math.exp(-dt * 12));
+    if (!state.finished) {
+        if (state.pouring) pour(dt);
+        settleFoam(dt);
+    }
+    render();
+
+    requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ---------- 採点 ---------- */
+function finishGame() {
+    if (state.finished) return;
+    state.finished = true;
+    state.pouring = false;
+    state.targetAngle = CFG.restAngle;   // ボトルを立ててグラスを見せる
+    ui.stream.style.height = '0px';
+    ui.area.classList.add('judged');
+
+    const total = state.beer + state.foam;
+    const beerRatio = total > 0 ? state.beer / total * 100 : 0;
+    const foamRatio = 100 - beerRatio;
+    const diff = Math.abs(CFG.idealBeer - beerRatio);
+    let score = 100;
+    const comments = [];
+
+    if (total < 95) {
+        const p = Math.round((95 - total) * 2);
+        score -= p;
+        comments.push('量が足りません。（-' + p + '点）');
+    }
+
+    let spillPenalty = 0;
+    if (state.spilled > 1) {
+        spillPenalty = Math.max(5, Math.min(60, Math.round(state.spilled * 2)));
+        score -= spillPenalty;
+        comments.push('あふれてもったいないです。（-' + spillPenalty + '点）');
+    }
+
+    if (total <= 50) {
+        score -= 50;
+        comments.push('量が少なすぎて評価できません。');
+    } else if (diff <= 3) {
+        comments.push('黄金比（7:3）です。お見事！');
+    } else if (diff <= 10) {
+        const p = Math.round(diff);
+        score -= p;
+        comments.push('良いバランスですが、もう少しです。（-' + p + '点）');
+    } else {
+        const p = Math.round(diff * 2);
+        score -= p;
+        comments.push(foamRatio > 30
+            ? '泡が多すぎます。ボトルを立てすぎないように。（-' + p + '点）'
+            : '泡が少なすぎます。もう少し勢いをつけましょう。（-' + p + '点）');
+    }
+
+    score = Math.max(0, Math.min(100, Math.round(score)));
+
+    const sd = el('score-display');
+    sd.textContent = score;
+    sd.className = score === 100 ? 's-perfect' : score >= 80 ? 's-good' : score >= 60 ? 's-ok' : 's-bad';
+
+    // 称号（総量・比率・こぼし量から診断。上から順に最初に合致したもの）
+    const title = TITLES.find(t => t.c({
+        T: total, B: beerRatio, F: foamRatio, S: state.spilled, dB: diff, score: score
+    }));
+
+    if (score === 100 && !title.rare) {
+        comments.push('総量100%・ビール7:3ちょうどに近づけると、まだ上の称号があります。');
+    }
+
+    const rank = el('rank-name');
+    rank.textContent = title.name;
+    rank.className = 'rank-name ' + title.cls;
+    el('rank-stars').textContent = title.rare ? '★'.repeat(title.rare) : '';
+    el('rank-note').textContent = title.note;
+
+    el('res-total').textContent = Math.round(total);
+    el('res-beer').textContent = Math.round(beerRatio);
+    el('res-foam').textContent = Math.round(foamRatio);
+
+    const row = el('detail-spill-row');
+    if (spillPenalty > 0) {
+        row.classList.remove('hidden');
+        el('res-spill').textContent = Math.round(state.spilled) + '%';
+    } else {
+        row.classList.add('hidden');
+    }
+
+    el('comment-display').innerHTML = comments.map(c => '<p>・' + c + '</p>').join('');
+
+    ui.panel.classList.add('is-open');
+}
+
+function resetGame() {
+    state.pouring = false; state.poured = false; state.beer = 0; state.foam = 0;
+    state.spilled = 0; state.angle = CFG.restAngle; state.targetAngle = CFG.restAngle;
+    state.finished = false; state.spillTimer = 0;
+    particles = [];
+
+    ui.panel.classList.remove('is-open');
+    ui.area.classList.remove('judged');
+    ui.hint.innerHTML = HINT_DEFAULT;
+    render();
+}
+
+ui.hint.innerHTML = HINT_DEFAULT;
+render();
+</script>
+</body>
+</html>
